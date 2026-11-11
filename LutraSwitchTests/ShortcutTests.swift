@@ -38,6 +38,36 @@ struct ShortcutTests {
         #expect(input.flagsChanged([], shortcut: shortcut) == .init())
     }
 
+    @Test func outsideClickCancelsBeforeModifierReleaseAndConsumesTheClick() {
+        var input = ShortcutInput()
+        let mode = ShortcutInput.Mode.switching(shortcut)
+        let preview = CGRect(x: -400, y: 100, width: 300, height: 200)
+        _ = input.keyDown(tab, flags: shortcut.flags, repeat: false, mode: mode)
+        _ = input.keyUp(tab)
+
+        #expect(input.mouseDown(0, at: .zero, previewFrame: preview) == .init(consume: true, action: .cancel))
+        #expect(input.flagsChanged([], shortcut: shortcut) == .init())
+        #expect(input.mouseDragged(0) == .init(consume: true))
+        #expect(input.mouseUp(1) == .init())
+        #expect(input.mouseUp(0) == .init(consume: true))
+        #expect(input.mouseUp(0) == .init())
+
+        #expect(input.keyDown(tab, flags: shortcut.flags, repeat: false, mode: mode).action == .begin(backward: false))
+        #expect(input.flagsChanged([], shortcut: shortcut).action == .commit)
+    }
+
+    @Test func clicksPassThroughInsideThePreviewOrWhenItIsHidden() {
+        var input = ShortcutInput()
+        let preview = CGRect(x: -400, y: 100, width: 300, height: 200)
+        #expect(input.mouseDown(0, at: .zero, previewFrame: preview) == .init())
+
+        _ = input.keyDown(tab, flags: shortcut.flags, repeat: false, mode: .switching(shortcut))
+        #expect(input.mouseDown(0, at: .zero, previewFrame: nil) == .init())
+        #expect(input.mouseDown(0, at: CGPoint(x: -200, y: 200), previewFrame: preview) == .init())
+        #expect(input.mouseUp(0) == .init())
+        #expect(input.flagsChanged([], shortcut: shortcut).action == .commit)
+    }
+
     @Test func customBindingPassesCommandTabThroughAndCommitsOnEitherModifier() throws {
         let custom = Shortcut(
             keyCode: tab, modifierFlags: CGEventFlags([.maskAlternate, .maskControl]).rawValue, keyLabel: "Tab"

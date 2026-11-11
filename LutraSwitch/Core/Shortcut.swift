@@ -62,6 +62,7 @@ struct ShortcutInput {
 
     private(set) var isHolding = false
     private var consumedKeys = Set<UInt16>()
+    private var consumedMouseButtons = Set<Int64>()
 
     mutating func keyDown(_ key: UInt16, flags: CGEventFlags, repeat isRepeat: Bool, mode: Mode) -> Result {
         if consumedKeys.contains(key) { return Result(consume: true) }
@@ -110,6 +111,22 @@ struct ShortcutInput {
         return Result(action: .commit)
     }
 
+    mutating func mouseDown(_ button: Int64, at location: CGPoint, previewFrame: CGRect?) -> Result {
+        if consumedMouseButtons.contains(button) { return Result(consume: true) }
+        guard isHolding, let previewFrame, !previewFrame.contains(location) else { return Result() }
+        cancelHold()
+        consumedMouseButtons.insert(button)
+        return Result(consume: true, action: .cancel)
+    }
+
+    func mouseDragged(_ button: Int64) -> Result {
+        Result(consume: consumedMouseButtons.contains(button))
+    }
+
+    mutating func mouseUp(_ button: Int64) -> Result {
+        Result(consume: consumedMouseButtons.remove(button) != nil)
+    }
+
     mutating func cancelHold() {
         isHolding = false
     }
@@ -117,5 +134,6 @@ struct ShortcutInput {
     mutating func reset() {
         isHolding = false
         consumedKeys.removeAll()
+        consumedMouseButtons.removeAll()
     }
 }

@@ -401,7 +401,8 @@ final class AppController {
         case .commit:
             apply(interaction.release())
         case .cancel:
-            cancelSession()
+            // The event tap already cleared the hold and may have received a new shortcut.
+            apply(interaction.cancel())
         case .recordCommandTab:
             guard isRecording else { return }
             useCommandTab()
@@ -453,6 +454,7 @@ final class AppController {
             lastPointerLocation = NSEvent.mouseLocation
         }
         panel.show(currentBounds: snapshot.currentBounds)
+        monitor.previewFrame = panel.visibleFrame
         updateMaintenanceTimer()
         if reveal { preview.revealSelection() }
 
@@ -475,6 +477,7 @@ final class AppController {
     }
 
     private func dismissPreview() {
+        monitor.previewFrame = nil
         sessionID = nil
         snapshot = nil
         lastPointerLocation = nil
