@@ -2,6 +2,18 @@
 
 LutraSwitch 是 macOS 26 及以上版本的菜单栏窗口切换器。默认使用 `⌥Tab`（Alt + Tab），按窗口的最近使用顺序选择，支持在同一个应用的多个窗口之间切换。
 
+## 应用截图
+
+<p>
+  <a href="docs/screenshots/shortcut-asc.png"><img src="docs/screenshots/shortcut-asc.png" alt="自定义窗口切换快捷键" width="48%"></a>
+  <a href="docs/screenshots/dock-preview-asc.png"><img src="docs/screenshots/dock-preview-asc.png" alt="悬停 Dock 图标时预览应用窗口" width="48%"></a>
+</p>
+
+<p>
+  <a href="docs/screenshots/dock-asc.png"><img src="docs/screenshots/dock-asc.png" alt="在设置中开启 Dock 悬停预览" width="48%"></a>
+  <a href="docs/screenshots/control-asc.png"><img src="docs/screenshots/control-asc.png" alt="通用设置中的快捷键、Dock 和系统权限" width="48%"></a>
+</p>
+
 ## 运行
 
 1. 用 Xcode 26 或更新版本打开 `LutraSwitch.xcodeproj`，选择 **LutraSwitch** scheme 和 **My Mac**，然后按 `⌘R`。
