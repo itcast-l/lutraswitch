@@ -343,7 +343,7 @@ struct ResourceLifecycleTests {
     @Test func previewReleasesRemovedImagesAndIcons() throws {
         let model = PreviewModel()
         let id = WindowID(pid: 1, number: 1)
-        let window = WindowSummary(id: id, appName: "Test", title: "Test", minimized: false, bounds: nil)
+        let window = WindowSummary(id: id, appName: "Test", title: "Test", minimized: false, bounds: nil, canClose: true)
         _ = model.updateWindows([window])
         let context = try #require(CGContext(
             data: nil, width: 8, height: 8, bitsPerComponent: 8, bytesPerRow: 32,

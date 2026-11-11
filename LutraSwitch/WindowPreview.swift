@@ -143,7 +143,8 @@ final class SwitcherPanel {
         hover: @escaping (WindowID) -> Void,
         click: @escaping (WindowID) -> Void,
         scroll: @escaping (Int) -> Void,
-        style: PreviewStyle = .switcher
+        style: PreviewStyle = .switcher,
+        close: ((WindowID) -> Void)? = nil
     ) {
         self.model = model
         self.style = style
@@ -161,7 +162,9 @@ final class SwitcherPanel {
         panel.animationBehavior = .none
         panel.acceptsMouseMovedEvents = true
         panel.scrollSelection = scroll
-        let hosting = HostingView(rootView: WindowPreview(model: model, style: style, hover: hover, click: click))
+        let hosting = HostingView(rootView: WindowPreview(
+            model: model, style: style, hover: hover, click: click, close: close
+        ))
         hosting.sizingOptions = []
         panel.contentView = hosting
     }
@@ -255,6 +258,7 @@ private struct WindowPreview: View {
     let style: PreviewStyle
     let hover: (WindowID) -> Void
     let click: (WindowID) -> Void
+    let close: ((WindowID) -> Void)?
 
     var body: some View {
         VStack(spacing: style.cardSpacing) {
@@ -326,9 +330,35 @@ private struct WindowPreview: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
+        .overlay(alignment: .topLeading) {
+            if window.canClose, let close {
+                closeButton(for: window) { close(window.id) }
+                    .padding(4)
+            }
+        }
         .onContinuousHover { phase in
             if case .active = phase { hover(window.id) }
         }
+    }
+
+    private func closeButton(for window: WindowSummary, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: "xmark")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(.black.opacity(0.72))
+                .frame(width: 18, height: 18)
+                .background(.white.opacity(0.88), in: Circle())
+                .overlay {
+                    Circle()
+                        .strokeBorder(.black.opacity(0.12), lineWidth: 1)
+                        .allowsHitTesting(false)
+                }
+                .frame(width: 24, height: 24)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("关闭窗口 \(window.title)")
+        .help("关闭窗口")
     }
 
     private func pageControls(_ layout: PreviewLayout) -> some View {

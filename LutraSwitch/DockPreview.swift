@@ -69,7 +69,8 @@ final class DockPreview {
         hover: { [weak self] in self?.highlight($0) },
         click: { [weak self] in self?.open($0) },
         scroll: { [weak self] in self?.moveSelection($0) },
-        style: .dock
+        style: .dock,
+        close: { [weak self] in self?.catalog.close($0) }
     )
 
     private var timer: Timer?

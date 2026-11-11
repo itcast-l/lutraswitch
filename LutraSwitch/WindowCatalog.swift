@@ -15,6 +15,7 @@ struct WindowSummary: Identifiable, Equatable, Sendable {
     let title: String
     let minimized: Bool
     let bounds: CGRect?
+    let canClose: Bool
 }
 
 struct WindowSnapshot: Sendable {
@@ -160,6 +161,22 @@ final class WindowCatalog: @unchecked Sendable {
         }
     }
 
+    func close(_ id: WindowID) {
+        queue.async {
+            guard AXIsProcessTrusted(),
+                  let app = NSRunningApplication(processIdentifier: id.pid),
+                  !app.isHidden, !app.isTerminated else { return }
+            let application = self.applications[id.pid]?.element ?? self.applicationElement(pid: id.pid)
+            guard let window = self.window(id, in: application),
+                  let button: CFTypeRef = self.attribute(window, kAXCloseButtonAttribute),
+                  CFGetTypeID(button) == AXUIElementGetTypeID() else { return }
+
+            if AXUIElementPerformAction(button as! AXUIElement, kAXPressAction as CFString) == .success {
+                self.changed(.windows)
+            }
+        }
+    }
+
     func activate(_ id: WindowID) {
         queue.async {
             self.pendingFocus = nil
@@ -167,7 +184,7 @@ final class WindowCatalog: @unchecked Sendable {
                   !app.isHidden, !app.isTerminated, AXIsProcessTrusted() else { return }
 
             let application = self.applications[id.pid]?.element ?? self.applicationElement(pid: id.pid)
-            guard let window = self.windowElements(application).first(where: { self.system.number(of: $0) == id.number }),
+            guard let window = self.window(id, in: application),
                   let attributes = self.windowAttributes(window) else { return }
 
             let server = self.serverWindows()
@@ -280,7 +297,8 @@ final class WindowCatalog: @unchecked Sendable {
                 appName: app.name,
                 title: attributes.title.isEmpty ? app.name : attributes.title,
                 minimized: attributes.minimized,
-                bounds: server.bounds[id]
+                bounds: server.bounds[id],
+                canClose: attributes.canClose
             ))
         }
         updateWindowObservers(for: &application, currentElements: currentElements)
@@ -288,22 +306,25 @@ final class WindowCatalog: @unchecked Sendable {
         return summaries
     }
 
-    private func windowAttributes(_ element: AXUIElement) -> (title: String, minimized: Bool)? {
-        let names = [kAXRoleAttribute, kAXSubroleAttribute, kAXMinimizedAttribute, kAXTitleAttribute] as CFArray
+    private func windowAttributes(_ element: AXUIElement) -> (title: String, minimized: Bool, canClose: Bool)? {
+        let names = [kAXRoleAttribute, kAXSubroleAttribute, kAXMinimizedAttribute,
+                     kAXTitleAttribute, kAXCloseButtonAttribute] as CFArray
         var result: CFArray?
         guard AXUIElementCopyMultipleAttributeValues(element, names, [], &result) == .success,
-              let values = result as? [Any], values.count == 4,
+              let values = result as? [Any], values.count == 5,
               values[0] as? String == kAXWindowRole else { return nil }
         let minimized = values[2] as? Bool ?? false
         let subrole = values[1] as? String
         // WeChat reports its standard main window as a dialog while minimized.
         guard subrole == kAXStandardWindowSubrole || (minimized && subrole == kAXDialogSubrole) else { return nil }
         let title = (values[3] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        return (title, minimized)
+        let canClose = CFGetTypeID(values[4] as CFTypeRef) == AXUIElementGetTypeID()
+        return (title, minimized, canClose)
     }
 
-    private func windowElements(_ application: AXUIElement) -> [AXUIElement] {
-        attribute(application, kAXWindowsAttribute) ?? []
+    private func window(_ id: WindowID, in application: AXUIElement) -> AXUIElement? {
+        let windows: [AXUIElement] = attribute(application, kAXWindowsAttribute) ?? []
+        return windows.first { system.number(of: $0) == id.number }
     }
 
     private func focusedWindow(pid: pid_t, application: AXUIElement? = nil) -> WindowID? {
