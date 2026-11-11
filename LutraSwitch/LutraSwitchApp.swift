@@ -1,4 +1,5 @@
 import AppKit
+import ServiceManagement
 import SwiftUI
 
 @main
@@ -99,6 +100,8 @@ private struct GeneralSettingsView: View {
                 }
             }
 
+            LoginItemSettings()
+
             Section("Dock") {
                 Toggle("悬停应用图标时预览窗口", isOn: Binding(
                     get: { controller.dockPreviewEnabled },
@@ -153,6 +156,53 @@ private struct GeneralSettingsView: View {
             } else {
                 Button(button, action: action)
             }
+        }
+    }
+}
+
+private struct LoginItemSettings: View {
+    @State private var status: SMAppService.Status = .notRegistered
+    @State private var errorMessage: String?
+
+    private var isAdded: Bool { status == .enabled || status == .requiresApproval }
+
+    var body: some View {
+        Section("启动") {
+            Toggle("添加到启动项", isOn: Binding(get: { isAdded }, set: updateRegistration))
+            if status == .requiresApproval {
+                LabeledContent("需要在系统设置中允许") {
+                    Button("打开登录项…", action: SMAppService.openSystemSettingsLoginItems)
+                }
+            }
+            if let errorMessage {
+                Text(errorMessage)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .onAppear(perform: refreshStatus)
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            refreshStatus()
+        }
+    }
+
+    private func refreshStatus() {
+        status = SMAppService.mainApp.status
+    }
+
+    private func updateRegistration(_ shouldAdd: Bool) {
+        refreshStatus()
+        guard shouldAdd != isAdded else { return }
+        errorMessage = nil
+        defer { refreshStatus() }
+
+        do {
+            if shouldAdd {
+                try SMAppService.mainApp.register()
+            } else {
+                try SMAppService.mainApp.unregister()
+            }
+        } catch {
+            errorMessage = "无法更新启动项。\(error.localizedDescription)"
         }
     }
 }
