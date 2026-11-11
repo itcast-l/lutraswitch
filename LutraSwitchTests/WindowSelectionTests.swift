@@ -18,6 +18,13 @@ struct WindowSelectionTests {
         #expect(WindowSelection(windows: order, current: chrome).selected == weChat)
     }
 
+    @Test func startingInReverseSelectsTheLastWindowOnQuickRelease() {
+        var interaction = SwitchInteraction()
+        interaction.begin(backward: true)
+        #expect(interaction.release() == .none)
+        #expect(interaction.prepare(windows: [chrome, weChat, finder], current: chrome) == .commit(finder))
+    }
+
     @Test func tracksWindowsInTheSameAppIndependently() {
         var history = WindowRecency()
         history.record(chrome)

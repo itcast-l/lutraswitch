@@ -6,7 +6,7 @@ import SwiftUI
 
 @MainActor @Observable
 final class AppController {
-    private static let shortcutKey = "window-switch-shortcut"
+    private static let shortcutKey = "window-switch-shortcut-v2"
     private(set) var shortcut: Shortcut
     private(set) var accessibilityAllowed = false
     private(set) var inputMonitoringAllowed = false
@@ -49,10 +49,13 @@ final class AppController {
         let defaults = UserDefaults.standard
         let stored = defaults.data(forKey: Self.shortcutKey)
             .flatMap { try? JSONDecoder().decode(Shortcut.self, from: $0) }
-        shortcut = stored.flatMap { $0.isValid ? $0 : nil } ?? .defaultValue
-        if let stored, Shortcut.isSystemSwitcher(key: stored.keyCode, modifiers: stored.flags),
-           let migrated = try? JSONEncoder().encode(shortcut) {
-            defaults.set(migrated, forKey: Self.shortcutKey)
+        if let stored, stored.isValid {
+            shortcut = stored
+        } else {
+            let legacy = defaults.data(forKey: "window-switch-shortcut")
+                .flatMap { try? JSONDecoder().decode(Shortcut.self, from: $0) }
+            // Older versions reserved Command-Tab for macOS. Require a new selection to take it over.
+            shortcut = legacy.flatMap { $0.isValid && !$0.replacesSystemSwitcher ? $0 : nil } ?? .defaultValue
         }
     }
 
@@ -232,6 +235,11 @@ final class AppController {
         endRecording()
     }
 
+    func useCommandTab() {
+        saveShortcut(.commandTab)
+        endRecording()
+    }
+
     private func record(key: UInt16, flags: UInt64, characters: String?, isRepeat: Bool) {
         guard !isRepeat else { return }
         if Int(key) == kVK_Escape {
@@ -240,7 +248,7 @@ final class AppController {
         }
         let modifiers = CGEventFlags(rawValue: flags).intersection(Shortcut.modifierMask)
         if Shortcut.isSystemSwitcher(key: key, modifiers: modifiers) {
-            recordingError = "⌘Tab 和 ⌘⇧Tab 由 macOS 使用。请选择其他组合键。"
+            useCommandTab()
             return
         }
         let special: [Int: String] = [
@@ -308,7 +316,11 @@ final class AppController {
     }
 
     private func configureMonitor() {
-        monitor.configure(shortcut: shortcut, enabled: isListening && !isRecording)
+        if isListening {
+            monitor.configure(isRecording ? .recording : .switching(shortcut))
+        } else {
+            monitor.configure(.inactive)
+        }
     }
 
     private func updateDockPreviewAvailability() {
@@ -377,11 +389,11 @@ final class AppController {
 
     private func handle(_ action: ShortcutInput.Action) {
         switch action {
-        case .begin:
+        case .begin(let backward):
             guard isListening, !isRecording else { return }
             apply(interaction.cancel())
             sessionID = UUID()
-            interaction.begin()
+            interaction.begin(backward: backward)
             updateDockPreviewAvailability()
             refreshSnapshot()
         case .move(let direction):
@@ -390,6 +402,9 @@ final class AppController {
             apply(interaction.release())
         case .cancel:
             cancelSession()
+        case .recordCommandTab:
+            guard isRecording else { return }
+            useCommandTab()
         }
     }
 

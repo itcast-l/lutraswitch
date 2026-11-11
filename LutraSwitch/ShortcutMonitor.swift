@@ -6,8 +6,7 @@ final class ShortcutMonitor {
     private var port: CFMachPort?
     private var source: CFRunLoopSource?
     private var input = ShortcutInput()
-    private var shortcut = Shortcut.defaultValue
-    private var enabled = false
+    private var mode = ShortcutInput.Mode.inactive
     var action: ((ShortcutInput.Action) -> Void)?
     var interrupted: (() -> Void)?
 
@@ -36,10 +35,9 @@ final class ShortcutMonitor {
         return isListening
     }
 
-    func configure(shortcut: Shortcut, enabled: Bool) {
-        if self.shortcut != shortcut || !enabled { input.cancelHold() }
-        self.shortcut = shortcut
-        self.enabled = enabled
+    func configure(_ mode: ShortcutInput.Mode) {
+        if self.mode != mode { input.cancelHold() }
+        self.mode = mode
     }
 
     func cancelHold() {
@@ -48,7 +46,7 @@ final class ShortcutMonitor {
 
     func stop() {
         input.reset()
-        enabled = false
+        mode = .inactive
         if let source { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes) }
         if let port { CFMachPortInvalidate(port) }
         source = nil
@@ -58,7 +56,7 @@ final class ShortcutMonitor {
     private func shouldConsume(_ type: CGEventType, key: UInt16, flags: CGEventFlags, isRepeat: Bool) -> Bool {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             input.reset()
-            enabled = false
+            mode = .inactive
             DispatchQueue.main.async { [weak self] in self?.interrupted?() }
             return false
         }
@@ -67,9 +65,10 @@ final class ShortcutMonitor {
         switch type {
         case .keyUp:
             result = input.keyUp(key)
-        case .keyDown where enabled:
-            result = input.keyDown(key, flags: flags, repeat: isRepeat, shortcut: shortcut)
-        case .flagsChanged where enabled:
+        case .keyDown:
+            result = input.keyDown(key, flags: flags, repeat: isRepeat, mode: mode)
+        case .flagsChanged:
+            guard case .switching(let shortcut) = mode else { return false }
             result = input.flagsChanged(flags, shortcut: shortcut)
         default:
             return false

@@ -85,10 +85,16 @@ private struct GeneralSettingsView: View {
                             controller.beginRecording()
                         }
                     }
+                    Button("使用 ⌘Tab", action: controller.useCommandTab)
+                        .help("接管 macOS 的应用切换快捷键")
+                        .disabled(controller.shortcut.replacesSystemSwitcher)
                     Button("恢复默认快捷键") { controller.restoreShortcut() }
                 }
                 if controller.isRecording {
                     Text(controller.recordingError ?? "请按下组合键。按 Esc 取消。")
+                        .foregroundStyle(.secondary)
+                } else if controller.shortcut.replacesSystemSwitcher {
+                    Text("⌘Tab 切换窗口，⌘⇧Tab 反向切换。")
                         .foregroundStyle(.secondary)
                 }
             }

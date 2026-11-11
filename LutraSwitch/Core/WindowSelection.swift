@@ -37,8 +37,11 @@ struct WindowSelection: Equatable {
     private(set) var windows: [WindowID]
     private(set) var selected: WindowID?
 
-    init(windows: [WindowID], current: WindowID?) {
-        self.init(windows: windows, selected: windows.first { $0 != current } ?? windows.first)
+    init(windows: [WindowID], current: WindowID?, backward: Bool = false) {
+        let selected = backward
+            ? windows.last { $0 != current } ?? windows.last
+            : windows.first { $0 != current } ?? windows.first
+        self.init(windows: windows, selected: selected)
     }
 
     init(windows: [WindowID], selected: WindowID?) {
@@ -79,7 +82,7 @@ struct SwitchInteraction {
 
     private enum Phase {
         case idle
-        case loading(moves: [Int], released: Bool)
+        case loading(backward: Bool, moves: [Int], released: Bool)
         case selecting(WindowSelection)
     }
 
@@ -95,13 +98,13 @@ struct SwitchInteraction {
         return nil
     }
 
-    mutating func begin() {
-        phase = .loading(moves: [], released: false)
+    mutating func begin(backward: Bool = false) {
+        phase = .loading(backward: backward, moves: [], released: false)
     }
 
     mutating func prepare(windows: [WindowID], current: WindowID?) -> Effect {
-        guard case let .loading(moves, released) = phase else { return .none }
-        var selection = WindowSelection(windows: windows, current: current)
+        guard case let .loading(backward, moves, released) = phase else { return .none }
+        var selection = WindowSelection(windows: windows, current: current, backward: backward)
         for direction in moves { selection.move(direction) }
 
         if released || windows.isEmpty {
@@ -114,9 +117,9 @@ struct SwitchInteraction {
 
     mutating func move(_ direction: Int) -> Effect {
         switch phase {
-        case .loading(var moves, false):
+        case .loading(let backward, var moves, false):
             moves.append(direction)
-            phase = .loading(moves: moves, released: false)
+            phase = .loading(backward: backward, moves: moves, released: false)
         case .selecting(var selection):
             selection.move(direction)
             phase = .selecting(selection)
@@ -151,8 +154,8 @@ struct SwitchInteraction {
         switch phase {
         case .idle:
             return .none
-        case .loading(let moves, _):
-            phase = .loading(moves: moves, released: true)
+        case .loading(let backward, let moves, _):
+            phase = .loading(backward: backward, moves: moves, released: true)
             return .none
         case .selecting(let selection):
             phase = .idle

@@ -7,6 +7,10 @@ struct Shortcut: Codable, Equatable {
     static let defaultValue = Shortcut(
         keyCode: UInt16(kVK_Tab), modifierFlags: CGEventFlags.maskAlternate.rawValue, keyLabel: "Tab"
     )
+    static let commandTab = Shortcut(
+        keyCode: UInt16(kVK_Tab), modifierFlags: CGEventFlags.maskCommand.rawValue, keyLabel: "Tab"
+    )
+    static let reverseCommandTabFlags: CGEventFlags = [.maskCommand, .maskShift]
 
     let keyCode: UInt16
     let modifierFlags: UInt64
@@ -14,14 +18,16 @@ struct Shortcut: Codable, Equatable {
 
     var flags: CGEventFlags { CGEventFlags(rawValue: modifierFlags) }
 
+    var replacesSystemSwitcher: Bool { keyCode == Self.commandTab.keyCode && flags == .maskCommand }
+
     static func isSystemSwitcher(key: UInt16, modifiers: CGEventFlags) -> Bool {
-        key == UInt16(kVK_Tab) && (modifiers == .maskCommand || modifiers == [.maskCommand, .maskShift])
+        key == commandTab.keyCode && (modifiers == commandTab.flags || modifiers == reverseCommandTabFlags)
     }
 
     var isValid: Bool {
         !flags.intersection([.maskCommand, .maskAlternate, .maskControl]).isEmpty
             && flags == flags.intersection(Self.modifierMask)
-            && !Self.isSystemSwitcher(key: keyCode, modifiers: flags)
+            && !(keyCode == Self.commandTab.keyCode && flags == Self.reverseCommandTabFlags)
             && ![kVK_Escape, kVK_LeftArrow, kVK_RightArrow].contains(Int(keyCode))
             && !keyLabel.isEmpty
     }
@@ -35,11 +41,18 @@ struct Shortcut: Codable, Equatable {
 }
 
 struct ShortcutInput {
+    enum Mode: Equatable {
+        case inactive
+        case switching(Shortcut)
+        case recording
+    }
+
     enum Action: Equatable {
-        case begin
+        case begin(backward: Bool)
         case move(Int)
         case commit
         case cancel
+        case recordCommandTab
     }
 
     struct Result: Equatable {
@@ -50,10 +63,17 @@ struct ShortcutInput {
     private(set) var isHolding = false
     private var consumedKeys = Set<UInt16>()
 
-    mutating func keyDown(_ key: UInt16, flags: CGEventFlags, repeat isRepeat: Bool, shortcut: Shortcut) -> Result {
+    mutating func keyDown(_ key: UInt16, flags: CGEventFlags, repeat isRepeat: Bool, mode: Mode) -> Result {
         if consumedKeys.contains(key) { return Result(consume: true) }
         let modifiers = flags.intersection(Shortcut.modifierMask)
-        guard !Shortcut.isSystemSwitcher(key: key, modifiers: modifiers) else { return Result() }
+        if mode == .recording {
+            guard !isRepeat, Shortcut.isSystemSwitcher(key: key, modifiers: modifiers) else { return Result() }
+            consumedKeys.insert(key)
+            return Result(consume: true, action: .recordCommandTab)
+        }
+        guard case .switching(let shortcut) = mode else { return Result() }
+        let backward = shortcut.replacesSystemSwitcher && modifiers == Shortcut.reverseCommandTabFlags
+        let matches = key == shortcut.keyCode && (modifiers == shortcut.flags || backward)
         let action: Action
 
         if isHolding {
@@ -62,12 +82,12 @@ struct ShortcutInput {
             case kVK_LeftArrow: action = .move(-1)
             case kVK_RightArrow: action = .move(1)
             default:
-                guard key == shortcut.keyCode, modifiers == shortcut.flags else { return Result() }
-                action = .move(1)
+                guard matches else { return Result() }
+                action = .move(backward ? -1 : 1)
             }
         } else {
-            guard key == shortcut.keyCode, modifiers == shortcut.flags, !isRepeat else { return Result() }
-            action = .begin
+            guard matches, !isRepeat else { return Result() }
+            action = .begin(backward: backward)
         }
 
         guard !isRepeat else { return Result(consume: true) }
