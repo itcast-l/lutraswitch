@@ -4,6 +4,8 @@ LutraSwitch 是 macOS 26 及以上版本的菜单栏窗口切换器。默认使�
 
 ## 应用截图
 
+![LutraSwitch 窗口切换器，显示窗口缩略图和应用图标](docs/screenshots/window-switcher.png)
+
 <p>
   <a href="docs/screenshots/shortcut-asc.png"><img src="docs/screenshots/shortcut-asc.png" alt="自定义窗口切换快捷键" width="48%"></a>
   <a href="docs/screenshots/dock-preview-asc.png"><img src="docs/screenshots/dock-preview-asc.png" alt="悬停 Dock 图标时预览应用窗口" width="48%"></a>
