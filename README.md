@@ -1,5 +1,7 @@
 # LutraSwitch
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 LutraSwitch 是 macOS 26 及以上版本的菜单栏窗口切换器。默认使用 `⌥Tab`（Alt + Tab），按窗口的最近使用顺序选择，支持在同一个应用的多个窗口之间切换。
 
 ## 主要功能
@@ -58,6 +60,10 @@ xcodebuild -project LutraSwitch.xcodeproj -scheme LutraSwitch -destination 'plat
 4. 录入一个自定义快捷键，退出并重新启动，确认新快捷键仍然生效且系统 `⌘Tab` 照常工作。关闭屏幕录制权限，确认用图标和标题仍可切换。
 5. 在设置中点「录入快捷键…」并按 `⌘Tab`。确认设置保存且两个切换器都未弹出。再次按 `⌘Tab` 或 `⌘⇧Tab`，确认只打开 LutraSwitch，并可在按住 `⌘` 时切换轮选方向。退出应用后确认原生应用切换器恢复，重启 LutraSwitch 后确认接管设置仍生效。点「恢复默认快捷键」后确认 `⌥Tab` 打开 LutraSwitch，`⌘Tab` 打开系统切换器。
 6. 开启 Dock 点击最小化并关闭悬停预览。用有多个窗口的应用验证首次点击聚焦、再次点击收起、第三次点击恢复。再用 `open -n -a 应用名` 打开支持多实例的应用，确认仅收起有焦点的那个窗口，恢复时回到原实例。检查修饰键点击、右键菜单、拖拽和最小化窗口图标仍能由 Dock 处理。
+
+## 许可证
+
+本项目采用 [MIT 许可证](LICENSE)。
 
 ## 系统兼容性
 
