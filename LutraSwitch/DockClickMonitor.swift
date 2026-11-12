@@ -65,9 +65,9 @@ final class DockClickMonitor {
         let dockPID: pid_t
         let timeout: DispatchWorkItem
 
-        func forwardIfPending() {
+        func replayIfPending() {
             guard request.claimFallback() else { return }
-            DispatchQueue.main.async { [release, dockPID] in release.forward(to: dockPID) }
+            DispatchQueue.main.async { [release, dockPID] in release.replayClick(to: dockPID) }
         }
     }
 
@@ -86,17 +86,20 @@ final class DockClickMonitor {
             clickCount = event.getIntegerValueField(.mouseEventClickState)
         }
 
-        func forward(to dockPID: pid_t) {
+        func replayClick(to dockPID: pid_t) {
             guard NSRunningApplication(processIdentifier: dockPID)?.bundleIdentifier == "com.apple.dock",
                   let source = CGEventSource(stateID: .privateState) else { return }
-            source.userData = DockClickMonitor.forwardedEvent
-            guard let event = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp,
-                                      mouseCursorPosition: location, mouseButton: .left) else { return }
-            event.timestamp = timestamp
-            event.flags = flags
-            event.setIntegerValueField(.mouseEventNumber, value: eventNumber)
-            event.setIntegerValueField(.mouseEventClickState, value: clickCount)
-            event.postToPid(dockPID)
+            source.userData = DockClickMonitor.replayedEvent
+            guard let down = CGEvent(mouseEventSource: source, mouseType: .leftMouseDown,
+                                     mouseCursorPosition: location, mouseButton: .left),
+                  let up = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp,
+                                   mouseCursorPosition: location, mouseButton: .left) else { return }
+            for event in [down, up] {
+                event.flags = flags
+                event.setIntegerValueField(.mouseEventNumber, value: eventNumber)
+                event.setIntegerValueField(.mouseEventClickState, value: clickCount)
+                event.postToPid(dockPID)
+            }
         }
     }
 
@@ -107,14 +110,15 @@ final class DockClickMonitor {
         case interrupted
 
         init?(_ type: CGEventType, _ event: CGEvent) {
+            if (type == .leftMouseDown || type == .leftMouseUp),
+               event.getIntegerValueField(.eventSourceUserData) == DockClickMonitor.replayedEvent {
+                return nil
+            }
             switch type {
             case .leftMouseDown:
                 self = event.flags.intersection(DockClickMonitor.modifiers).isEmpty
                     ? .press(event.location, event.timestamp) : .cancelPress
             case .leftMouseUp:
-                guard event.getIntegerValueField(.eventSourceUserData) != DockClickMonitor.forwardedEvent else {
-                    return nil
-                }
                 self = event.flags.intersection(DockClickMonitor.modifiers).isEmpty
                     ? .release(Release(event)) : .cancelPress
             case .leftMouseDragged, .rightMouseDown, .otherMouseDown:
@@ -127,7 +131,7 @@ final class DockClickMonitor {
         }
     }
 
-    private nonisolated static let forwardedEvent: Int64 = 0x4C_75_74_72_61_44_6F_63
+    private nonisolated static let replayedEvent: Int64 = 0x4C_75_74_72_61_44_6F_63
     private nonisolated static let modifiers: CGEventFlags = [
         .maskAlternate, .maskCommand, .maskControl, .maskShift, .maskSecondaryFn
     ]
@@ -179,7 +183,7 @@ final class DockClickMonitor {
         press = nil
         configuration = UUID()
         pendingClick?.timeout.cancel()
-        pendingClick?.forwardIfPending()
+        pendingClick?.replayIfPending()
     }
 
     private func stop() {
@@ -192,7 +196,7 @@ final class DockClickMonitor {
         port = nil
     }
 
-    private func shouldConsume(_ event: Event) -> Bool {
+    private func shouldCancelDockRelease(_ event: Event) -> Bool {
         switch event {
         case .press(let point, let timestamp):
             beginPress(at: point, timestamp: timestamp)
@@ -245,7 +249,7 @@ final class DockClickMonitor {
         let request = DockClickRequest()
         let configuration = self.configuration
         let timeout = DispatchWorkItem {
-            if request.claimFallback() { release.forward(to: dockPID) }
+            if request.claimFallback() { release.replayClick(to: dockPID) }
         }
         pendingClick = PendingClick(request: request, release: release, dockPID: dockPID, timeout: timeout)
         DispatchQueue.main.asyncAfter(deadline: request.deadline, execute: timeout)
@@ -257,7 +261,7 @@ final class DockClickMonitor {
                     self.pendingClick = nil
                     if handled, self.configuration == configuration { self.handledClick(target.icon) }
                 }
-                if !handled, request.claimFallback(afterCompletion: true) { release.forward(to: dockPID) }
+                if !handled, request.claimFallback(afterCompletion: true) { release.replayClick(to: dockPID) }
             }
         }
     }
@@ -265,7 +269,11 @@ final class DockClickMonitor {
     private static let callback: CGEventTapCallBack = { _, type, event, context in
         guard let context, let input = Event(type, event) else { return Unmanaged.passUnretained(event) }
         let monitor = Unmanaged<DockClickMonitor>.fromOpaque(context).takeUnretainedValue()
-        let consume = MainActor.assumeIsolated { monitor.shouldConsume(input) }
-        return consume ? nil : Unmanaged.passUnretained(event)
+        if MainActor.assumeIsolated({ monitor.shouldCancelDockRelease(input) }) {
+            // Let Dock end its press without activating the icon. Only move the event's location.
+            let display = CGDisplayBounds(CGMainDisplayID())
+            event.location = CGPoint(x: display.midX, y: display.midY)
+        }
+        return Unmanaged.passUnretained(event)
     }
 }
