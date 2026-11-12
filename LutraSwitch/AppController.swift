@@ -16,11 +16,15 @@ final class AppController {
     private(set) var isRecording = false
     private(set) var recordingError: String?
     private(set) var dockPreviewEnabled = UserDefaults.standard.object(forKey: "dock-preview-enabled") as? Bool ?? true
+    private(set) var dockClickMinimizeEnabled = UserDefaults.standard.bool(forKey: "dock-click-minimize-enabled")
 
     @ObservationIgnored private let monitor = ShortcutMonitor()
     @ObservationIgnored private let preview = PreviewModel()
     @ObservationIgnored private let thumbnails = WindowThumbnails()
     @ObservationIgnored private lazy var dockPreview = DockPreview(catalog: catalog, thumbnails: thumbnails)
+    @ObservationIgnored private lazy var dockClick = DockClickMonitor(catalog: catalog) { [weak self] icon in
+        self?.dockPreview.dismiss(afterClickOn: icon)
+    }
     @ObservationIgnored private lazy var panel = SwitcherPanel(
         model: preview,
         hover: { [weak self] in self?.hoverWindow($0) },
@@ -94,11 +98,15 @@ final class AppController {
         observe(workspace, NSWorkspace.activeSpaceDidChangeNotification) { controller, _ in
             controller.cancelSession()
             controller.dockPreview.dismiss()
+            controller.dockClick.invalidateClick()
+            controller.catalog.dockSpaceChanged()
             controller.refreshSnapshot()
         }
         observe(.default, NSApplication.didChangeScreenParametersNotification) { controller, _ in
             controller.cancelSession()
             controller.dockPreview.dismiss()
+            controller.dockClick.invalidateClick()
+            controller.catalog.dockSpaceChanged()
             controller.refreshSnapshot()
         }
         for name in [NSWorkspace.sessionDidResignActiveNotification, NSWorkspace.willSleepNotification] {
@@ -150,6 +158,7 @@ final class AppController {
         endRecording()
         cancelSession()
         dockPreview.setEnabled(false)
+        dockClick.configure(enabled: false)
         monitor.stop()
         isListening = false
         thumbnails.clear()
@@ -199,7 +208,13 @@ final class AppController {
     func setDockPreviewEnabled(_ enabled: Bool) {
         dockPreviewEnabled = enabled
         UserDefaults.standard.set(enabled, forKey: "dock-preview-enabled")
-        updateDockPreviewAvailability()
+        updateDockAvailability()
+    }
+
+    func setDockClickMinimizeEnabled(_ enabled: Bool) {
+        dockClickMinimizeEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: "dock-click-minimize-enabled")
+        updateDockAvailability()
     }
 
     func beginRecording() {
@@ -208,7 +223,7 @@ final class AppController {
         isRecording = true
         recordingError = nil
         configureMonitor()
-        updateDockPreviewAvailability()
+        updateDockAvailability()
         localRecorder = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             let key = event.keyCode
             let flags = event.modifierFlags.rawValue
@@ -227,7 +242,7 @@ final class AppController {
         isRecording = false
         recordingError = nil
         configureMonitor()
-        updateDockPreviewAvailability()
+        updateDockAvailability()
     }
 
     func restoreShortcut() {
@@ -312,7 +327,7 @@ final class AppController {
             monitor.stop()
         }
         if !isListening { cancelSession() }
-        updateDockPreviewAvailability()
+        updateDockAvailability()
     }
 
     private func configureMonitor() {
@@ -323,11 +338,11 @@ final class AppController {
         }
     }
 
-    private func updateDockPreviewAvailability() {
-        dockPreview.setEnabled(
-            started && dockPreviewEnabled && accessibilityAllowed && canIdentifyWindows && sessionActive
-                && !interaction.isRunning && !isRecording
-        )
+    private func updateDockAvailability() {
+        let dockAvailable = started && accessibilityAllowed && canIdentifyWindows && sessionActive
+            && !interaction.isRunning && !isRecording
+        dockPreview.setEnabled(dockAvailable && dockPreviewEnabled)
+        dockClick.configure(enabled: dockAvailable && dockClickMinimizeEnabled && CGPreflightPostEventAccess())
         updateMaintenanceTimer()
     }
 
@@ -394,7 +409,7 @@ final class AppController {
             apply(interaction.cancel())
             sessionID = UUID()
             interaction.begin(backward: backward)
-            updateDockPreviewAvailability()
+            updateDockAvailability()
             refreshSnapshot()
         case .move(let direction):
             moveSelection(direction)
@@ -488,7 +503,7 @@ final class AppController {
         preview.selected = nil
         preview.images.removeAll()
         preview.icons.removeAll()
-        updateDockPreviewAvailability()
+        updateDockAvailability()
     }
 
     private func observe(

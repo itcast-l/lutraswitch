@@ -107,6 +107,10 @@ private struct GeneralSettingsView: View {
                     get: { controller.dockPreviewEnabled },
                     set: controller.setDockPreviewEnabled
                 ))
+                Toggle("再次点击前台应用图标时最小化窗口", isOn: Binding(
+                    get: { controller.dockClickMinimizeEnabled },
+                    set: controller.setDockClickMinimizeEnabled
+                ))
             }
 
             Section("系统权限") {

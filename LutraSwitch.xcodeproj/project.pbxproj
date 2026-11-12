@@ -22,6 +22,9 @@
 		A00000000000000000000137 = {
 			isa = PBXBuildFile; fileRef = A0000000000000000000006E;
 		};
+		A00000000000000000000138 = {
+			isa = PBXBuildFile; fileRef = A00000000000000000000072;
+		};
 		A00000000000000000000070 = {
 			isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Core/ThumbnailImage.swift"; sourceTree = "<group>";
 		};
@@ -51,6 +54,12 @@
 		};
 		A000000000000000000000D2 = {
 			isa = PBXBuildFile; fileRef = A0000000000000000000006E;
+		};
+		A00000000000000000000072 = {
+			isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "DockClickMonitor.swift"; sourceTree = "<group>";
+		};
+		A000000000000000000000D6 = {
+			isa = PBXBuildFile; fileRef = A00000000000000000000072;
 		};
 		A00000000000000000000064 = {
 			isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppController.swift"; sourceTree = "<group>";
@@ -118,6 +127,12 @@
 		A000000000000000000000D1 = {
 			isa = PBXBuildFile; fileRef = A0000000000000000000006D;
 		};
+		A00000000000000000000073 = {
+			isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "DockClickRequestTests.swift"; sourceTree = "<group>";
+		};
+		A000000000000000000000D7 = {
+			isa = PBXBuildFile; fileRef = A00000000000000000000073;
+		};
 		A00000000000000000000001 = {
 			isa = PBXProject;
 			attributes = { LastSwiftUpdateCheck = 2620; LastUpgradeCheck = 2620; };
@@ -145,6 +160,7 @@
 			isa = PBXGroup; children = (
 				A00000000000000000000064,
 				A0000000000000000000006E,
+				A00000000000000000000072,
 				A00000000000000000000065,
 				A0000000000000000000006F,
 				A00000000000000000000070,
@@ -161,6 +177,7 @@
 			isa = PBXGroup; children = (
 				A0000000000000000000006C,
 				A0000000000000000000006D,
+				A00000000000000000000073,
 			); path = LutraSwitchTests; sourceTree = "<group>";
 		};
 		A00000000000000000000003 = {
@@ -179,6 +196,7 @@
 			isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (
 				A000000000000000000000C8,
 				A000000000000000000000D2,
+				A000000000000000000000D6,
 				A000000000000000000000C9,
 				A000000000000000000000D3,
 				A000000000000000000000D4,
@@ -198,12 +216,14 @@
 				A00000000000000000000135,
 				A00000000000000000000136,
 				A00000000000000000000137,
+				A00000000000000000000138,
 				A0000000000000000000012D,
 				A00000000000000000000130,
 				A00000000000000000000131,
 				A0000000000000000000012E,
 				A000000000000000000000D0,
 				A000000000000000000000D1,
+				A000000000000000000000D7,
 			); runOnlyForDeploymentPostprocessing = 0;
 		};
 		A00000000000000000000015 = {

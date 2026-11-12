@@ -2,6 +2,7 @@ import AppKit
 import ApplicationServices
 import CoreGraphics
 import Foundation
+import Synchronization
 
 struct RunningApp: Sendable {
     let pid: pid_t
@@ -73,6 +74,15 @@ final class WindowCatalog: @unchecked Sendable {
         let window: AXUIElement
     }
 
+    private struct DockMinimization {
+        let focused: WindowID
+        let windows: [WindowID]
+        let spaceGeneration: UUID
+    }
+
+    private typealias DockWindow = (id: WindowID, element: AXUIElement)
+    private static let dockAXTimeout: Float = 0.05
+
     private let queue = DispatchQueue(label: "LutraSwitch.WindowCatalog", qos: .userInitiated,
                                       autoreleaseFrequency: .workItem)
     private let system = WindowSystem()
@@ -80,6 +90,8 @@ final class WindowCatalog: @unchecked Sendable {
     private var applications: [pid_t: Application] = [:]
     private var recency = WindowRecency()
     private var pendingFocus: PendingFocus?
+    private let dockMinimizations = Mutex<[String: DockMinimization]>([:])
+    private var dockSpaceGeneration = UUID()
 
     init(changed: @escaping @Sendable (Change) -> Void) {
         self.changed = changed
@@ -92,6 +104,7 @@ final class WindowCatalog: @unchecked Sendable {
     func stop() {
         queue.async {
             self.pendingFocus = nil
+            self.dockMinimizations.withLock { $0.removeAll() }
             for pid in Array(self.applications.keys) { self.removeApplication(pid) }
             self.recency = WindowRecency()
         }
@@ -157,6 +170,9 @@ final class WindowCatalog: @unchecked Sendable {
 
     func forgetApplication(_ pid: pid_t) {
         queue.async {
+            self.dockMinimizations.withLock { records in
+                records = records.filter { $0.value.focused.pid != pid }
+            }
             self.removeApplication(pid)
         }
     }
@@ -198,17 +214,180 @@ final class WindowCatalog: @unchecked Sendable {
                 return
             }
 
-            self.raise(window, application: application)
-            if !app.isActive {
-                guard app.activate(options: []) else { return }
-            }
-
-            // Activation and deminiaturization are asynchronous. Once the app
-            // becomes frontmost, AppKit may have picked a different key window.
-            let token = UUID()
-            self.pendingFocus = PendingFocus(token: token, id: id, app: app, application: application, window: window)
-            self.confirmFocus(token, attempts: 5)
+            self.focus(id, window: window, app: app, application: application)
         }
+    }
+
+    // The event tap checks this without waiting for the catalog queue.
+    func mayToggleDockWindows(bundlePath: String, appPIDs: [pid_t], frontPID: pid_t?) -> Bool {
+        if let frontPID, frontPID != ProcessInfo.processInfo.processIdentifier, appPIDs.contains(frontPID) {
+            return true
+        }
+        return dockMinimizations.withLock { records in
+            guard let minimized = records[bundlePath] else { return false }
+            return appPIDs.contains(minimized.focused.pid)
+        }
+    }
+
+    func toggleDockWindows(
+        bundlePath: String, appPIDs: [pid_t], frontPID: pid_t?, request: DockClickRequest,
+        completion: @escaping @Sendable (Bool) -> Void
+    ) {
+        queue.async {
+            guard request.canPrepare, AXIsProcessTrusted() else {
+                completion(false)
+                return
+            }
+            if let minimized = self.dockMinimizations.withLock({ $0[bundlePath] }),
+               appPIDs.contains(minimized.focused.pid),
+               self.restoreDockWindows(minimized, bundlePath: bundlePath, request: request) {
+                completion(true)
+                return
+            }
+            guard request.canPrepare, let frontPID, appPIDs.contains(frontPID),
+                  frontPID != ProcessInfo.processInfo.processIdentifier,
+                  let app = NSRunningApplication(processIdentifier: frontPID),
+                  app.isActive, !app.isHidden, !app.isTerminated else {
+                completion(false)
+                return
+            }
+            completion(self.minimizeDockWindows(
+                app, bundlePath: bundlePath, onlyFocused: appPIDs.count > 1, request: request
+            ))
+        }
+    }
+
+    func dockSpaceChanged() {
+        queue.async {
+            self.dockSpaceGeneration = UUID()
+        }
+    }
+
+    private func minimizeDockWindows(
+        _ app: NSRunningApplication, bundlePath: String, onlyFocused: Bool, request: DockClickRequest
+    ) -> Bool {
+        let pid = app.processIdentifier
+        let application = applicationElement(pid: pid, timeout: Self.dockAXTimeout)
+        guard let focused: AXUIElement = attribute(application, kAXFocusedWindowAttribute), request.canPrepare,
+              let target = dockWindow(focused, pid: pid), request.canPrepare else { return false }
+        let server = serverWindows()
+        let onScreen = server.onScreen
+        guard request.canPrepare, onScreen.contains(target.id),
+              windowAttributes(focused)?.minimized == false,
+              isEligible(target.id, minimized: false, server: server, onScreen: onScreen) else { return false }
+
+        // Minimize the focused window last so its siblings cannot take focus mid-operation.
+        var targets: [DockWindow] = []
+        guard request.canPrepare else { return false }
+        if !onlyFocused, let windows: [AXUIElement] = attribute(application, kAXWindowsAttribute) {
+            for window in windows {
+                guard request.canPrepare else { return false }
+                guard let candidate = dockWindow(window, pid: pid),
+                      candidate.id != target.id, onScreen.contains(candidate.id),
+                      windowAttributes(window)?.minimized == false,
+                      isEligible(candidate.id, minimized: false, server: server, onScreen: onScreen) else { continue }
+                targets.append(candidate)
+            }
+        }
+        targets.append(target)
+        guard request.canPrepare, app.isActive,
+              let current: AXUIElement = attribute(application, kAXFocusedWindowAttribute),
+              request.canPrepare, dockWindow(current, pid: pid)?.id == target.id,
+              app.isActive else { return false }
+
+        let minimized = applyDockMinimization(true, to: targets, request: request)
+        guard !minimized.isEmpty else { return false }
+        let record = DockMinimization(
+            focused: target.id, windows: minimized.map(\.id), spaceGeneration: dockSpaceGeneration
+        )
+        dockMinimizations.withLock { $0[bundlePath] = record }
+        changed(.windows)
+        return true
+    }
+
+    private func restoreDockWindows(
+        _ minimized: DockMinimization, bundlePath: String, request: DockClickRequest
+    ) -> Bool {
+        let pid = minimized.focused.pid
+        guard request.canPrepare, let app = NSRunningApplication(processIdentifier: pid),
+              !app.isTerminated, !app.isHidden else {
+            return false
+        }
+        let application = applicationElement(pid: pid, timeout: Self.dockAXTimeout)
+        guard let elements: [AXUIElement] = attribute(application, kAXWindowsAttribute) else { return false }
+        let tracked = Set(minimized.windows)
+        var windows: [WindowID: AXUIElement] = [:]
+        for element in elements {
+            guard request.canPrepare else { return false }
+            guard let window = dockWindow(element, pid: pid), tracked.contains(window.id) else { continue }
+            windows[window.id] = element
+            if windows.count == tracked.count { break }
+        }
+        guard request.canPrepare else { return false }
+        let spaces = system.currentSpaces()
+        var remaining: [WindowID] = []
+        var targets: [DockWindow] = []
+        for id in minimized.windows {
+            guard request.canPrepare else { return false }
+            guard let window = windows[id] else { continue }
+            let isMinimized: Bool? = attribute(window, kAXMinimizedAttribute)
+            if isMinimized == false { continue }
+            remaining.append(id)
+            // When the window's Space is unknown, restore only if the visible Spaces have stayed the same.
+            let onCurrentSpace = spaces.flatMap { system.isOnCurrentSpace(id.number, spaces: $0) }
+                ?? (minimized.spaceGeneration == dockSpaceGeneration)
+            if isMinimized == true, onCurrentSpace { targets.append((id, window)) }
+        }
+        let restored = applyDockMinimization(false, to: targets, request: request)
+        let restoredIDs = Set(restored.map(\.id))
+        remaining.removeAll { restoredIDs.contains($0) }
+        dockMinimizations.withLock {
+            $0[bundlePath] = remaining.isEmpty ? nil : DockMinimization(
+                focused: minimized.focused, windows: remaining, spaceGeneration: minimized.spaceGeneration
+            )
+        }
+        guard let target = restored.first(where: { $0.id == minimized.focused }) ?? restored.first else { return false }
+        AXUIElementSetMessagingTimeout(target.element, Self.dockAXTimeout)
+        focus(target.id, window: target.element, app: app, application: application)
+        changed(.windows)
+        return true
+    }
+
+    private func dockWindow(_ element: AXUIElement, pid: pid_t) -> DockWindow? {
+        AXUIElementSetMessagingTimeout(element, Self.dockAXTimeout)
+        guard let number = system.number(of: element) else { return nil }
+        return (WindowID(pid: pid, number: number), element)
+    }
+
+    private func applyDockMinimization(
+        _ minimized: Bool, to targets: [DockWindow], request: DockClickRequest
+    ) -> [DockWindow] {
+        guard !targets.isEmpty, request.beginApplying() else { return [] }
+        pendingFocus = nil
+        var changed: [DockWindow] = []
+        for target in targets {
+            let now = DispatchTime.now()
+            guard now < request.deadline else { break }
+            let remaining = Float(request.deadline.uptimeNanoseconds - now.uptimeNanoseconds) / 1_000_000_000
+            if remaining < Self.dockAXTimeout { AXUIElementSetMessagingTimeout(target.element, remaining) }
+            let result = AXUIElementSetAttributeValue(
+                target.element, kAXMinimizedAttribute as CFString, minimized ? kCFBooleanTrue : kCFBooleanFalse
+            )
+            if result == .success { changed.append(target) }
+            if result == .cannotComplete { break }
+        }
+        return changed
+    }
+
+    private func focus(_ id: WindowID, window: AXUIElement, app: NSRunningApplication, application: AXUIElement) {
+        pendingFocus = nil
+        raise(window, application: application)
+        if !app.isActive, !app.activate(options: []) { return }
+
+        // Once the app becomes frontmost, AppKit may have picked a different key window.
+        let token = UUID()
+        pendingFocus = PendingFocus(token: token, id: id, app: app, application: application, window: window)
+        confirmFocus(token, attempts: 5)
     }
 
     private func confirmFocus(_ token: UUID, attempts: Int) {
@@ -340,9 +519,9 @@ final class WindowCatalog: @unchecked Sendable {
         return value as? T
     }
 
-    private func applicationElement(pid: pid_t) -> AXUIElement {
+    private func applicationElement(pid: pid_t, timeout: Float = 0.12) -> AXUIElement {
         let application = AXUIElementCreateApplication(pid)
-        AXUIElementSetMessagingTimeout(application, 0.12)
+        AXUIElementSetMessagingTimeout(application, timeout)
         return application
     }
 

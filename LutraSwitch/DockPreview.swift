@@ -2,17 +2,43 @@ import AppKit
 import ApplicationServices
 import Foundation
 
-private struct DockIcon: Sendable {
+struct DockIcon: Sendable {
     let url: URL
     let frame: CGRect
+
+    var bundlePath: String { Self.bundlePath(url) }
+
+    func appKitFrame(desktopTop: CGFloat) -> CGRect {
+        CGRect(x: frame.minX, y: desktopTop - frame.maxY, width: frame.width, height: frame.height)
+    }
+
+    func runningApplications(includeHidden: Bool = false) -> [NSRunningApplication] {
+        let expected = bundlePath
+        let regularApps = NSWorkspace.shared.runningApplications.filter {
+            $0.activationPolicy == .regular && !$0.isTerminated && (includeHidden || !$0.isHidden)
+        }
+        let matches = regularApps.filter { $0.bundleURL.map(Self.bundlePath) == expected }
+        guard matches.isEmpty, let bundleID = Bundle(url: url)?.bundleIdentifier else { return matches }
+        let sameBundle = regularApps.filter { $0.bundleIdentifier == bundleID }
+        return sameBundle.count == 1 ? sameBundle : []
+    }
+
+    private static func bundlePath(_ url: URL) -> String {
+        url.resolvingSymlinksInPath().standardizedFileURL.path
+    }
 }
 
 // Dock AX calls can block while the Dock is animating or showing a menu.
-private final class DockHitTester: @unchecked Sendable {
+final class DockHitTester: @unchecked Sendable {
     private let queue = DispatchQueue(label: "LutraSwitch.DockHitTester", qos: .userInitiated,
                                       autoreleaseFrequency: .workItem)
+    private let timeout: Float
     private var dockPID: pid_t?
     private var root: AXUIElement?
+
+    init(timeout: Float = 0.1) {
+        self.timeout = timeout
+    }
 
     func hit(at point: CGPoint, completion: @escaping @Sendable (DockIcon?) -> Void) {
         queue.async {
@@ -27,7 +53,7 @@ private final class DockHitTester: @unchecked Sendable {
         if dockPID != dock.processIdentifier {
             dockPID = dock.processIdentifier
             root = AXUIElementCreateApplication(dock.processIdentifier)
-            if let root { AXUIElementSetMessagingTimeout(root, 0.1) }
+            if let root { AXUIElementSetMessagingTimeout(root, timeout) }
         }
 
         var hit: AXUIElement?
@@ -35,6 +61,7 @@ private final class DockHitTester: @unchecked Sendable {
               AXUIElementCopyElementAtPosition(root, Float(point.x), Float(point.y), &hit) == .success,
               let hit else { return nil }
 
+        AXUIElementSetMessagingTimeout(hit, timeout)
         let names = [kAXSubroleAttribute, "AXIsApplicationRunning", kAXURLAttribute,
                      kAXPositionAttribute, kAXSizeAttribute] as CFArray
         var attributes: CFArray?
@@ -173,9 +200,21 @@ final class DockPreview {
         clearItem()
     }
 
+    func dismiss(afterClickOn icon: DockIcon) {
+        guard enabled else { return }
+        if let desktopTop = NSScreen.screens.first?.frame.maxY {
+            suppressedIcon = DockIcon(url: icon.url, frame: icon.appKitFrame(desktopTop: desktopTop))
+        }
+        dismiss()
+    }
+
     func refresh() {
         guard let item, !loading else { return }
-        let apps = runningApps(for: item.url)
+        let apps = item.runningApplications().map { app in
+            RunningApp(pid: app.processIdentifier,
+                       name: app.localizedName ?? item.url.deletingPathExtension().lastPathComponent,
+                       hidden: false)
+        }
         guard !apps.isEmpty else {
             clearPanel()
             return
@@ -257,8 +296,7 @@ final class DockPreview {
             return
         }
 
-        let frame = CGRect(x: hit.frame.minX, y: desktopTop - hit.frame.maxY,
-                           width: hit.frame.width, height: hit.frame.height)
+        let frame = hit.appKitFrame(desktopTop: desktopTop)
         guard frame.contains(NSEvent.mouseLocation), suppressedIcon?.url != hit.url else { return }
 
         if item?.url == hit.url {
@@ -294,22 +332,6 @@ final class DockPreview {
                           height: frame.height).contains(point)
         }
         return false
-    }
-
-    private func runningApps(for url: URL) -> [RunningApp] {
-        let expected = url.resolvingSymlinksInPath().standardizedFileURL.path
-        let regularApps = NSWorkspace.shared.runningApplications.filter {
-            $0.activationPolicy == .regular && !$0.isTerminated && !$0.isHidden
-        }
-        var matches = regularApps.filter { $0.bundleURL?.resolvingSymlinksInPath().standardizedFileURL.path == expected }
-        if matches.isEmpty, let bundleID = Bundle(url: url)?.bundleIdentifier {
-            let sameBundle = regularApps.filter { $0.bundleIdentifier == bundleID }
-            if sameBundle.count == 1 { matches = sameBundle }
-        }
-        return matches.map { app in
-            return RunningApp(pid: app.processIdentifier, name: app.localizedName ?? url.deletingPathExtension().lastPathComponent,
-                              hidden: false)
-        }
     }
 
     private func receiveWindows(_ windows: [WindowSummary], request: UUID) {
