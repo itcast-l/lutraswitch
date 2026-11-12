@@ -18,7 +18,7 @@ LutraSwitch 是 macOS 26 及以上版本的菜单栏窗口切换器。默认使�
 </p>
 
 <p>
-  <a href="docs/screenshots/dock-asc.png"><img src="docs/screenshots/dock-asc.png" alt="在设置中开启 Dock 悬停预览" width="48%"></a>
+  <a href="docs/screenshots/dock-click-asc.png"><img src="docs/screenshots/dock-click-asc.png" alt="点击 Dock 图标收起和恢复窗口" width="48%"></a>
   <a href="docs/screenshots/control-asc.png"><img src="docs/screenshots/control-asc.png" alt="通用设置中的快捷键、Dock 和系统权限" width="48%"></a>
 </p>
 
